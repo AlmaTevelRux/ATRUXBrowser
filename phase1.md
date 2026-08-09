@@ -2,20 +2,21 @@
 
 ## Scope
 
-Functional desktop browser with Vivaldi-inspired UI touches — basic side panels, basic proxy, basic extension system, customizable UI chrome. Target: Linux desktop. Uses WebKitGTK as the practical rendering fallback while the custom engine work begins. Basic tab bar without tiling.
+Functional desktop browser with Vivaldi-inspired UI touches — basic side panels, basic proxy, basic extension system, customizable UI chrome. Target: cross-platform Rust (Linux, Windows, macOS). Uses wry + WebKitGTK as the practical rendering backend while the custom engine work begins. Basic tab bar without tiling.
 
 ---
 
 ## Architecture Decisions
 
-- **Rendering backend:** WebKitGTK 4.1 (latest stable, better security) — used as fallback while custom engine is developed
-- **Abstract rendering interface:** Define and implement in Phase 1 against WebKitGTK; makes Phase 3 migration tractable
+- **Rendering backend:** wry abstraction using WebKitGTK 4.1 on Linux, WKWebView on macOS, WebView2 on Windows — used as fallback while custom engine is developed
+- **Browser chrome UI:** egui, iced, or Slint (evaluate all three; Slint requires GPL/commercial license review)
+- **Abstract rendering interface:** Define and implement in Phase 1 against wry; makes Phase 3 migration tractable
 - **Custom engine strategy:** Combine best existing packages first; write from scratch only if no suitable packages exist. Evaluate by license, Rust-native preference, maintenance, spec coverage, integration effort.
 - **Custom engine prototype scope:** Phase 0: HTML+CSS + ACID. Phase 1: real-world sites (Wikipedia, GitHub, etc.)
 - **JS engine (Phase 1):** QuickJS primary (mature, spec-complete, small footprint). Boa fallback for performance isolation or Rust-native safety needs.
 - **JS engine architecture:** Pluggable via unified trait. Overhead is negligible (vtable dispatch); actual JS execution happens inside the engine.
-- **Shell language:** Rust with `gtk4-rs` — matches Boa/QuickJS integration and memory-safety goal
-- **UI toolkit:** GTK4 for maximum customization; libadwaita constrains chrome styling
+- **Shell language:** Rust — matches QuickJS/Boa integration and memory-safety goal
+- **UI toolkit:** egui, iced, or Slint for browser chrome. All are Rust-native and cross-platform. GTK4 is Linux-only and not needed.
 - **Process model:** Start single-process for simplicity; migrate to WebKit's multi-process model when stable
 - **Boa API surface:** Restricted sandbox with explicit allow-list for side-panel scripts
 - **Proxy system (Phase 1):** Custom proxy UI in Phase 1 (basic proxy); advanced rules/PAC in Phase 2
@@ -56,28 +57,27 @@ Functional desktop browser with Vivaldi-inspired UI touches — basic side panel
 
 | # | Component | Responsibility | Priority |
 |---|-----------|----------------|----------|
-| 1 | **WebKitGTK Embed (Fallback)** | Window, webview lifecycle, navigation, process model — fallback until custom engine is ready | P0 |
-| 2 | **Proxy System (Basic)** | System proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration | P0 |
-| 3 | **Tab Bar (Basic)** | Tab lifecycle: create, close, duplicate, pin/unpin. Drag-to-reorder, detach to new window. | P0 |
-| 4 | **Navigation Bar** | URL bar with back/forward/reload/stop. Protocol handling: use what we get, default missing protocol to https. Security indicators deferred. | P0 |
-| 5 | **Side Panels** | Dynamic web-panel system, editable headers, resize handles, state persistence | P1 |
-| 6 | **Bookmarks & History** | CRUD, folders, import/export (HTML/Netscape), search. Stored in SQLite. | P1 |
-| 7 | **Downloads** | Basic download, MIME sniffing, save dialog, progress indicator, notifications, download manager popover, quarantine, file type handling, retry failed. No pause/resume in Phase 1. | P1 |
-| 8 | **Settings Engine** | Single JSON file for preferences. Categories: General, Appearance, Privacy, Search, Proxy, Tabs, Language. Hybrid UI: main preferences window + quick toggles in chrome. First-run wizard: welcome → theme selection → import data → set defaults → finish. | P1 |
-| 9 | **Basic Extension Host** | Minimal extension system: content scripts, popup UI, request interception (block+redirect), basic local storage, tabs API (query/create/close). Directory-based loading. Runtime prompts. Event-driven background only. File-based storage. | P1 |
-| 10 | **JS Engine Wrapper (Pluggable)** | Unified trait for JS engines (QuickJS primary, Boa fallback). Exposes eval, bind, call, GC. Negligible overhead. | P1 |
-| 11 | **Boa Scripting Host** | Embed Boa for side-panel scripts and user automation as fallback engine; expose safe API surface | P2 |
-| 12 | **Session Management** | Save/restore window + tab layout states | P2 |
-| 13 | **Basic Themes** | Light/dark mode, accent colors, CSS-injected theming for chrome | P2 |
-| 14 | **DevTools Protocol Bridge** | Reuse WebKit's built-in inspector via remote debugging protocol. Console, basic DOM tree, basic network timeline. | P2 |
-| 15 | **Custom Engine Integration** | Abstract rendering interface design and WebKitGTK implementation (Phase 1). Engine switching layer (Phase 3). | P2 |
+| 1 | **wry Webview Embed (Cross-Platform)** | Window, webview lifecycle, navigation, process model — cross-platform via wry abstraction (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows) | P0 |
+| 2 | **egui/iced/Slint Browser Chrome** | Tab bar, navigation bar, side panels, menus — Rust-native cross-platform UI | P0 |
+| 3 | **Proxy System (Basic)** | System proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration | P0 |
+| 4 | **Tab Bar (Basic)** | Tab lifecycle: create, close, duplicate, pin/unpin. Drag-to-reorder, detach to new window. | P0 |
+| 5 | **Navigation Bar** | URL bar with back/forward/reload/stop. Protocol handling: use what we get, default missing protocol to https. Security indicators deferred. | P0 |
+| 6 | **Side Panels** | Dynamic web-panel system, editable headers, resize handles, state persistence | P1 |
+| 7 | **Bookmarks & History** | CRUD, folders, import/export (HTML/Netscape), search. Stored in SQLite. | P1 |
+| 8 | **Downloads** | Basic download, MIME sniffing, save dialog, progress indicator, notifications, download manager popover, quarantine, file type handling, retry failed. No pause/resume in Phase 1. | P1 |
+| 9 | **Settings Engine** | Single JSON file for preferences. Categories: General, Appearance, Privacy, Search, Proxy, Tabs, Language. Hybrid UI: main preferences window + quick toggles in chrome. First-run wizard: welcome → theme selection → import data → set defaults → finish. | P1 |
+| 10 | **Basic Extension Host** | Minimal extension system: content scripts, popup UI, request interception (block+redirect), basic local storage, tabs API (query/create/close). Directory-based loading. Runtime prompts. Event-driven background only. File-based storage. | P1 |
+| 11 | **JS Engine Wrapper (Pluggable)** | Unified trait for JS engines (QuickJS primary, Boa fallback). Exposes eval, bind, call, GC. Negligible overhead. | P1 |
+| 12 | **Boa Scripting Host** | Embed Boa for side-panel scripts and user automation as fallback engine; expose safe API surface | P2 |
+| 13 | **Session Management** | Save/restore window + tab layout states | P2 |
+| 14 | **Basic Themes** | Light/dark mode, accent colors, CSS-injected theming for chrome | P2 |
+| 15 | **Custom Engine Integration** | Abstract rendering interface design and wry implementation (Phase 1). Engine switching layer (Phase 3). | P2 |
 
 **Out of scope for Phase 1:**
 - Full WebExtensions API (only basic extension system in Phase 1)
 - Mouse gestures
 - Advanced keyboard shortcut editor
 - Notes, mail, calendar, feeds
-- Cross-platform (Linux-only for now)
 - Multiple profiles
 - Advanced proxy rules/PAC/scripts (basic proxy in Phase 1; advanced in Phase 2)
 - Per-tab proxy routing (Phase 4)
@@ -97,30 +97,31 @@ Functional desktop browser with Vivaldi-inspired UI touches — basic side panel
 
 ## Implementation Order (Phase 1)
 
-1. **Scaffold GTK app + WebKitGTK webview** — prove navigation, cookies, localStorage work.
-2. **Proxy system (basic)** — system proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration.
-3. **Basic extension host** — content scripts, basic popup UI, safe API surface for request interception.
-4. **JS Engine Wrapper (pluggable)** — define trait, implement QuickJS primary + Boa fallback. Prove with simple scripts.
-5. **Tab bar (basic)** — create, close, duplicate, pin/unpin, drag-to-reorder, detach.
-6. **Navigation bar** — URL bar with back/forward/reload/stop, protocol handling (default missing to https).
-7. **Side panels** — dynamic web-panel system with editable headers and persistence.
-8. **Bookmarks + History** — standard CRUD with import/export.
-9. **Downloads** — OS integration and progress UI.
-10. **Settings engine** — preferences, first-run, user data directory.
-11. **Session management** — save/restore current URLs.
-12. **Basic Themes** — light/dark + accent colors.
-13. **DevTools bridge** — remote debugging protocol wiring.
+1. **Scaffold Rust app + wry webview** — prove cross-platform window + webview works on Linux. Load test sites, prove navigation, cookies, localStorage work.
+2. **Choose and scaffold UI framework** — evaluate egui vs iced vs Slint. Implement basic window chrome (title bar, close/minimize/maximize).
+3. **Proxy system (basic)** — system proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration.
+4. **Basic extension host** — content scripts, basic popup UI, safe API surface for request interception.
+5. **JS Engine Wrapper (pluggable)** — define trait, implement QuickJS primary + Boa fallback. Prove with simple scripts.
+6. **Tab bar (basic)** — create, close, duplicate, pin/unpin, drag-to-reorder, detach.
+7. **Navigation bar** — URL bar with back/forward/reload/stop, protocol handling (default missing to https).
+8. **Side panels** — dynamic web-panel system with editable headers and persistence.
+9. **Bookmarks + History** — standard CRUD with import/export.
+10. **Downloads** — OS integration and progress UI.
+11. **Settings engine** — preferences, first-run, user data directory.
+12. **Session management** — save/restore current URLs.
+13. **Basic Themes** — light/dark + accent colors.
+14. **DevTools bridge** — reuse wry/webview remote debugging protocol wiring.
 
 ---
 
 ## Validation Milestones
 
-- **Milestone 1 (Weeks 1–2):** GTK window with a single WebKitGTK webview loads 5 test sites (Wikipedia, GitHub, Reddit, a SPA, and a site with heavy JS). Basic proxy UI works (system proxy + manual HTTP/HTTPS/SOCKS).
+- **Milestone 1 (Weeks 1–2):** Cross-platform Rust window with wry webview loads 5 test sites (Wikipedia, GitHub, Reddit, a SPA, and a site with heavy JS) on Linux. Basic proxy UI works (system proxy + manual HTTP/HTTPS/SOCKS). egui/iced/Slint chrome renders tabs and address bar.
 - **Milestone 2 (Weeks 3–4):** JS Engine Wrapper implemented: QuickJS primary, Boa fallback. Basic extension host loads a QuickJS-based content script and popup. Tab bar (basic) with create/close/duplicate/pin, drag-to-reorder, detach. Navigation bar with basic URL input, back/forward/reload/stop, and protocol handling (default missing protocol to https).
 - **Milestone 3 (Weeks 5–6):** Side panels with editable headers and persistent state. Request interception via basic extension API (ad blocking demo).
 - **Milestone 4 (Weeks 7–8):** Bookmarks, history, downloads, and settings.
 - **Milestone 5 (Weeks 9–10):** Session save/restore (current URLs only).
-- **Milestone 6 (Weeks 11–12):** Polish, basic themes, DevTools bridge (WebKit built-in inspector via remote debugging protocol: console, basic DOM, basic network), beta release.
+- **Milestone 6 (Weeks 11–12):** Polish, basic themes, beta release.
 
 ---
 

@@ -23,24 +23,24 @@ Before scoping features, here is the irreducible set of components a desktop bro
 
 ## Scope
 
-- **Phase 1:** Functional desktop browser with Vivaldi-inspired UI touches — basic side panels, basic proxy, basic extension system, customizable UI chrome. Target: Linux desktop. Uses WebKitGTK as the practical rendering fallback while the custom engine work begins. Basic tab bar without tiling.
-- **Phase 2:** Full Vivaldi-level feature set minus mail/calendar/feeds — advanced tab management (mute, stacking, hibernation), notes, themes, mouse gestures, keyboard shortcut editor, session management, advanced proxy, certificate handling, full extension host, multi-window support, integrated tools.
+- **Phase 1:** Functional desktop browser with Vivaldi-inspired UI touches — basic side panels, basic proxy, basic extension system, customizable UI chrome. Target: Linux desktop initially, but architecture is cross-platform Rust. Uses wry + WebKitGTK as the practical rendering fallback while the custom engine work begins. Basic tab bar without tiling.
+- **Phase 2:** Full Vivaldi-level feature set minus mail/calendar/feeds — advanced tab management (mute, stacking, hibernation), notes, themes, mouse gestures, keyboard shortcut editor, session management, advanced proxy, certificate handling, full extension host, multi-window support, integrated tools. Cross-platform: Linux, Windows, macOS via wry abstraction.
 - **Phase 3:** Custom engine integration — write our own engine or combine existing engines to replace the WebKitGTK fallback. Core request interception. Tab tiling (horizontal/vertical/grid, nested splits). Navigation state model. Search vs URL detection. Keyboard navigation/focus model. Tab groups.
 - **Phase 4:** Per-tab proxy routing, proxy authentication, tab suspension.
 - **Phase 5:** Advanced drag & drop (URL→tab, tab→tile).
 
 ## Architecture Decision: Rendering Engine
 
-**Decision:** Use **WebKitGTK 4.1 as the fallback rendering engine** in Phase 1, with the explicit strategic goal to replace it in Phase 3 by **writing our own engine or combining existing high-quality engines**.
+**Decision:** Use **wry as the cross-platform webview abstraction** in Phase 1/2, with WebKitGTK as the Linux backend. wry provides a unified Rust API while using platform-native webviews: WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows. This eliminates the need for platform-specific WebKit port work and aligns with the goal of a Rust-native, cross-platform browser.
 
-**Decision:** Define and implement the **abstract rendering interface in Phase 1** (wrapping WebKitGTK), so the Phase 3 migration is a matter of implementing the same trait against a different engine rather than a rewrite.
+**Decision:** Use **egui or iced for browser chrome/UI** instead of GTK4. Both are Rust-native, cross-platform GUI frameworks. egui is immediate-mode; iced is retained-mode. This keeps the entire stack in Rust and removes the GTK dependency.
 
 **Rationale:**
-- A browser without a spec-compliant HTML/CSS rendering engine is not a browser. Pure-Rust engines (e.g., Servo remnants, WRender) are not production-ready for general web content today.
-- WebKitGTK provides immediate functionality: HTML parsing, CSS layout/painting, hit-testing, navigation lifecycle, cookies, localStorage, sessionStorage, and a built-in JS engine (JavaScriptCore) for page scripts.
-- This allows Phase 1 to be functional while the custom engine research and development proceeds in parallel.
-- The project's long-term identity depends on owning the rendering stack, not renting it from WebKit.
-- Defining the abstract interface early ensures the shell never depends on WebKitGTK-specific APIs, making the eventual swap tractable.
+- The user does not require GTK specifically. The priority is cross-platform and Rust.
+- wry solves the cross-platform webview problem without writing platform-specific code.
+- egui/iced provide native-looking Rust GUI toolkits that work on all three platforms.
+- This architecture is simpler, more maintainable, and better aligned with the long-term goal of replacing the webview backend with a custom engine.
+- When the custom engine is ready in Phase 3, we only need to replace wry's backend, not rewrite the entire UI layer.
 
 **Phase 3 engine strategy:**
 - **Primary approach:** Find and combine the best existing packages/components (HTML parser, CSS engine, layout/paint pipeline, JS runtime) and unify them behind the abstract wrapper.
@@ -48,13 +48,28 @@ Before scoping features, here is the irreducible set of components a desktop bro
 - **Evaluation criteria:** License compatibility, Rust-native preference, maintenance status, spec coverage, integration effort.
 
 **Consequence for QuickJS/Boa:**
-- In Phase 1, page JS runs via WebKitGTK's JavaScriptCore.
+- In Phase 1, page JS runs via wry's webview backend (WebKitGTK's JavaScriptCore on Linux).
 - QuickJS and Boa remain **not** the page JS runtime. They become the **extension/scripting engine** for:
   - Side panel widgets
   - User scripts / content script injection
   - DevTools panels
   - Internal automation/scripting
 - This preserves the original architectural intent (custom JS engines) while accepting reality for web content rendering in the near term.
+
+## Architecture Decision: UI Toolkit and Windowing
+
+**Decision:** Use **egui or iced for browser chrome/UI** instead of GTK4. Both are Rust-native, cross-platform GUI frameworks. egui is immediate-mode; iced is retained-mode.
+
+**Decision:** Use **wry for webview abstraction** instead of embedding WebKitGTK directly. wry provides a unified Rust API while using platform-native webviews: WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows.
+
+**Rationale:**
+- GTK4 is Linux-only. The project requires cross-platform support (Linux, Windows, macOS) from Phase 2.
+- wry solves the cross-platform webview problem without writing platform-specific code.
+- egui/iced provide native-looking Rust GUI toolkits that work on all three platforms.
+- This keeps the entire stack in Rust, which aligns with the memory-safety and code-scannability goals.
+- When the custom engine is ready in Phase 3, we only need to replace wry's backend, not rewrite the entire UI layer.
+- The browser chrome (tabs, address bar, side panels, menus) is rendered in egui/iced.
+- Web content is rendered in wry's webview, which uses the platform's native webview engine.
 
 ## Architecture Decision: JS Engine Strategy (Phase 1)
 
@@ -103,10 +118,10 @@ Before scoping features, here is the irreducible set of components a desktop bro
 
 | # | Component | Responsibility | Priority |
 |---|-----------|----------------|----------|
-| 1 | **WebKitGTK Embed (Fallback)** | Window, webview lifecycle, navigation, process model — fallback until custom engine is ready | P0 |
-| 2 | **Proxy System (Basic)** | System proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration | P0 |
-| 3 | **Tab Bar (Basic)** | Tab lifecycle: create, close, duplicate, pin/unpin. Drag-to-reorder, detach to new window. | P0 |
-| 4 | **Tab Tiling** | Horizontal/vertical/grid tiling, nested splits, drag tabs between tiles, tile collapse on close | Phase 3 |
+| 1 | **wry Webview Embed (Cross-Platform)** | Window, webview lifecycle, navigation, process model — cross-platform via wry abstraction (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows) | P0 |
+| 2 | **egui/iced Browser Chrome** | Tab bar, navigation bar, side panels, menus — Rust-native cross-platform UI | P0 |
+| 3 | **Proxy System (Basic)** | System proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration | P0 |
+| 4 | **Tab Bar (Basic)** | Tab lifecycle: create, close, duplicate, pin/unpin. Drag-to-reorder, detach to new window. | P0 |
 | 5 | **Navigation Bar** | URL bar with back/forward/reload/stop. Protocol handling: use what we get, default missing protocol to https. Security indicators deferred. | P0 |
 | 6 | **Side Panels** | Dynamic web-panel system, editable headers, resize handles, state persistence | P1 |
 | 7 | **Bookmarks & History** | CRUD, folders, import/export (HTML/Netscape), search. Stored in SQLite. | P1 |
@@ -117,14 +132,13 @@ Before scoping features, here is the irreducible set of components a desktop bro
 | 12 | **Boa Scripting Host** | Embed Boa for side-panel scripts and user automation as fallback engine; expose safe API surface | P2 |
 | 13 | **Session Management** | Save/restore window + tab layout states | P2 |
 | 14 | **Basic Themes** | Light/dark mode, accent colors, CSS-injected theming for chrome | P2 |
-| 15 | **Custom Engine Integration** | Abstract rendering interface design and WebKitGTK implementation (Phase 1). Engine switching layer (Phase 3). | P2 |
+| 15 | **Custom Engine Integration** | Abstract rendering interface design and wry implementation (Phase 1). Engine switching layer (Phase 3). | P2 |
 
 **Out of scope for Phase 1:**
 - Full WebExtensions API (only basic extension system in Phase 1)
 - Mouse gestures
 - Advanced keyboard shortcut editor
 - Notes, mail, calendar, feeds
-- Cross-platform (Linux-only for now)
 - Multiple profiles
 - Advanced proxy rules/PAC/scripts (basic proxy in Phase 1; advanced in Phase 2)
 - Per-tab proxy routing (Phase 4)
@@ -139,6 +153,97 @@ Before scoping features, here is the irreducible set of components a desktop bro
 - Tab suspension (Phase 4)
 - Advanced drag & drop: URL→tab, tab→tile (Phase 5)
 - Cookie viewer (Phase 3)
+
+---
+
+## Why wry + egui/iced in Phase 1
+
+The table below explains why we chose wry + egui/iced over GTK4 and platform-specific WebKit ports.
+
+| Approach | Cross-Platform | Rust-Native | GTK Dependency | Phase 1 Effort | Phase 3 Migration |
+|----------|---------------|-------------|----------------|-----------------|-------------------|
+| **GTK4 + WebKitGTK** | Linux only | Partial (GTK is C) | Yes | Low | Medium — replace WebKitGTK |
+| **Own abstraction + 3 WebKit ports** | Yes | Partial | Yes (Linux) | High — write abstraction + 3 backends | Low — swap backend |
+| **wry + egui/iced** | Yes | Yes | No | Low — use existing crates | Low — replace wry backend |
+| **wry + Slint** | Yes | Yes | No | Low — use existing crates | Low — replace wry backend |
+
+**Conclusion:** wry + egui/iced/Slint gives us cross-platform, Rust-native, low-effort Phase 1 with a clean migration path to the custom engine in Phase 3. GTK4 adds Linux-only dependency without corresponding benefit.
+
+## UI Toolkit Deep-Dive: GTK4 vs egui vs iced vs wry
+
+This section documents the detailed analysis of why we chose wry + egui/iced over GTK4.
+
+### The Open Question Explained
+
+**Original question:** Should we use GTK4 for the browser shell?
+
+**Why GTK4 was the original choice:**
+- Mature, production-ready GUI toolkit
+- Deep Linux integration
+- Large widget set out of the box
+- WebKitGTK is already a GTK widget, so integration is natural
+
+**Why GTK4 is no longer the choice:**
+- **Linux-only.** The project requires cross-platform support (Linux, Windows, macOS) from Phase 2.
+- **C-based.** GTK4 is written in C with Rust bindings (`gtk4-rs`). This adds FFI boundary complexity.
+- **Not needed.** The browser chrome (tabs, address bar, side panels) doesn't need a full desktop GUI toolkit. A lightweight Rust-native UI is sufficient.
+- **Phase 3 incompatibility.** When the custom engine arrives, GTK4's GTK-specific integration code becomes dead weight.
+
+### Why wry + egui/iced
+
+| Factor | GTK4 + WebKitGTK | wry + egui/iced |
+|--------|-----------------|-----------------|
+| **Cross-platform** | Linux only | Yes — Linux, Windows, macOS |
+| **Language** | C + Rust bindings | Pure Rust |
+| **Webview backend** | WebKitGTK only | Platform-native (WebKitGTK, WKWebView, WebView2) |
+| **UI chrome** | GTK widgets | egui/iced widgets |
+| **Phase 3 migration** | Replace WebKitGTK + rewrite GTK chrome | Replace wry backend only |
+| **Maintenance burden** | High — 3 platform ports if cross-platform | Low — wry handles platform differences |
+| **Community** | Mature but declining | Growing rapidly in Rust ecosystem |
+
+### egui vs iced vs Slint
+
+| Factor | egui | iced | Slint |
+|--------|------|------|-------|
+| **Paradigm** | Immediate-mode | Retained-mode | Declarative retained-mode |
+| **Language** | Rust | Rust | Rust (.slint DSL + Rust) |
+| **Learning curve** | Low | Medium | Medium — need to learn .slint DSL |
+| **Customization** | High — you control every frame | Medium — framework manages state | High — declarative UI with full styling |
+| **Performance** | Fast for simple UIs, can struggle with complex layouts | Generally better for complex, stateful UIs | Excellent — compiled to native code, GPU-accelerated |
+| **Maturity** | High — used in production by many projects | Medium — promising but newer | Medium-High — backed by company, used in embedded and desktop |
+| **Widget set** | Basic but growing | More complete out of the box | Rich — buttons, tabs, scroll areas, list views, etc. |
+| **Styling** | Manual per-widget | Theming support | CSS-like styling, themes, animations |
+| **Best for** | Tools, debug panels, custom UIs | Full applications with standard widgets | Polished desktop applications with native look |
+| **License** | MIT/Apache-2.0 | MIT/Apache-2.0 | GPL/Commercial — requires careful license review |
+
+**Recommendation:** Evaluate egui, iced, and Slint with a prototype. For a browser chrome with tabs, address bar, and side panels, all three could work. egui gives maximum control; iced gives structure; Slint gives the most polished native look with CSS-like styling. The choice depends on which feels more natural for the team and license compatibility.
+
+**License note on Slint:** Slint uses GPL for the open-source version, with commercial licenses available. For a proprietary browser, this requires either: (1) purchasing a commercial license, (2) releasing the browser under GPL, or (3) using Slint only for internal tools while keeping the browser itself proprietary. This must be resolved before selecting Slint.
+
+### What wry Gives Us
+
+wry is a cross-platform webview library that abstracts the platform's native webview:
+
+| Platform | Backend | Webview Engine |
+|----------|---------|----------------|
+| **Linux** | WebKitGTK | WebKit |
+| **macOS** | WKWebView | WebKit |
+| **Windows** | WebView2 | Blink (Edge) |
+
+This means:
+- **No platform-specific code** in our application
+- **Native webview performance** on each platform
+- **Automatic updates** as platforms update their webviews
+- **Smaller attack surface** than embedding a full browser engine
+
+### What This Means for Phase 3
+
+When the custom engine is ready:
+1. We implement a new wry backend that uses our custom engine instead of the platform's native webview
+2. The browser chrome (egui/iced) does not change
+3. The extension system, JS engine wrapper, and all other Phase 1/2 code continues to work
+
+This is why wry is the right choice: it's a **replacement boundary**, not a permanent dependency.
 
 ## Phase 2 — Component Breakdown
 
@@ -202,19 +307,20 @@ Before scoping features, here is the irreducible set of components a desktop bro
 
 ## Proposed Implementation Order (Phase 1)
 
-1. **Scaffold GTK app + WebKitGTK webview** — prove navigation, cookies, localStorage work.
-2. **Proxy system (basic)** — system proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration.
-3. **Basic extension host** — content scripts, basic popup UI, safe API surface for request interception.
-4. **JS Engine Wrapper (pluggable)** — define trait, implement QuickJS primary + Boa fallback. Prove with simple scripts.
-5. **Tab bar (basic)** — create, close, duplicate, pin/unpin, drag-to-reorder, detach.
-6. **Navigation bar** — URL bar with back/forward/reload/stop, protocol handling (default missing to https).
-7. **Side panels** — dynamic web-panel system with editable headers and persistence.
-8. **Bookmarks + History** — standard CRUD with import/export.
-9. **Downloads** — OS integration and progress UI.
-10. **Settings engine** — preferences, first-run, user data directory.
-11. **Session management** — save/restore current URLs.
-12. **Basic Themes** — light/dark + accent colors.
-13. **DevTools bridge** — remote debugging protocol wiring.
+1. **Scaffold Rust app + wry webview** — prove cross-platform window + webview works on Linux. Load test sites, prove navigation, cookies, localStorage work.
+2. **Choose and scaffold UI framework** — evaluate egui vs iced vs Slint. Implement basic window chrome (title bar, close/minimize/maximize).
+3. **Proxy system (basic)** — system proxy passthrough, manual HTTP/HTTPS/SOCKS proxy configuration.
+4. **Basic extension host** — content scripts, basic popup UI, safe API surface for request interception.
+5. **JS Engine Wrapper (pluggable)** — define trait, implement QuickJS primary + Boa fallback. Prove with simple scripts.
+6. **Tab bar (basic)** — create, close, duplicate, pin/unpin, drag-to-reorder, detach.
+7. **Navigation bar** — URL bar with back/forward/reload/stop, protocol handling (default missing to https).
+8. **Side panels** — dynamic web-panel system with editable headers and persistence.
+9. **Bookmarks + History** — standard CRUD with import/export.
+10. **Downloads** — OS integration and progress UI.
+11. **Settings engine** — preferences, first-run, user data directory.
+12. **Session management** — save/restore current URLs.
+13. **Basic Themes** — light/dark + accent colors.
+14. **DevTools bridge** — reuse wry/webview remote debugging protocol wiring.
 
 ## Proposed Implementation Order (Phase 2)
 
@@ -265,9 +371,10 @@ Before scoping features, here is the irreducible set of components a desktop bro
 | 4 | **Custom engine prototype scope** | ACID test only vs real-world sites | Phase 0: HTML+CSS + ACID. Phase 1: real-world sites (Wikipedia, GitHub, etc.) |
 | 5 | **JS engine (Phase 1)** | Boa primary vs QuickJS primary | QuickJS primary (mature, spec-complete, small footprint). Boa fallback for performance isolation or Rust-native safety needs. |
 | 6 | **JS engine architecture** | Pluggable vs tightly coupled | Pluggable via unified trait. Overhead is negligible (vtable dispatch); actual JS execution happens inside the engine. |
-| 7 | **Shell language** | Rust (gtk-rs) vs C/GTK | Rust with `gtk4-rs` — matches Boa/QuickJS integration and memory-safety goal |
-| 8 | **UI toolkit** | GTK4 vs libadwaita | GTK4 for maximum customization; libadwaita constrains chrome styling |
-| 9 | **Process model** | Single-process vs multi-process (WebKit site per process) | Start single-process for simplicity; migrate to WebKit's multi-process model when stable |
+| 7 | **Shell language** | Rust (gtk-rs) vs C/GTK | Rust — matches Boa/QuickJS integration and memory-safety goal |
+| 8 | **UI toolkit (Phase 1)** | GTK4 vs libadwaita vs egui vs iced vs Slint vs wry-style | **Cross-platform Rust GUI:** egui, iced, or Slint for browser chrome + wry for webview abstraction. GTK4 is Linux-only and not needed. Evaluate all three; Slint requires GPL/commercial license review. |
+| 9 | **Cross-platform webview (Phase 1/2)** | GTK-only vs own abstraction vs wry-style | **wry** — cross-platform webview abstraction. Uses WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows. Eliminates need for platform-specific WebKit port work. |
+| 10 | **Process model** | Single-process vs multi-process (WebKit site per process) | Start single-process for simplicity; migrate to WebKit's multi-process model when stable |
 | 10 | **Boa API surface** | Full ECMAScript vs restricted sandbox | Restricted sandbox with explicit allow-list for side-panel scripts |
 | 11 | **Proxy system (Phase 1)** | System proxy only vs custom proxy UI | Custom proxy UI in Phase 1 (basic proxy); advanced rules/PAC in Phase 2 |
 | 12 | **Extension system (Phase 1)** | Full WebExtensions vs minimal custom API | Minimal custom extension API in Phase 1; full WebExtensions subset in Phase 2 |
@@ -360,18 +467,22 @@ Before scoping features, here is the irreducible set of components a desktop bro
 | 2026-08-09 | **DevTools protocol feasibility:** No mature Rust implementation. Building from scratch is 6–12 months minimum | Engineering assessment |
 | 2026-08-09 | **Text rendering approach:** FreeType is the standard choice for font rasterization. HarfBuzz for shaping. Both are mature C libraries with Rust bindings | Engineering recommendation |
 | 2026-08-09 | **Spec compliance vs real-world compatibility:** Passing the spec is necessary but not sufficient. Real-world sites depend on bug-for-bug compatibility with Chrome/Firefox/Safari. Expect 60–80% compatibility with a spec-compliant engine, 95%+ only after years of site-specific fixes | Engineering assessment |
+| 2026-08-09 | **WebKitGTK cross-platform status:** WebKitGTK is Linux-only (GTK port). Not available on Windows/macOS. For cross-platform Phase 2, we need either platform-specific WebKit ports or a cross-platform abstraction layer | Engineering assessment |
+| 2026-08-09 | **Cross-platform rendering strategy for Phase 2:** Options: (1) Abstract rendering backend and use WebKitGTK on Linux, WKWebView on macOS, WebKit2 on Windows; (2) Use wry-style webview abstraction; (3) Accelerate custom engine to be truly cross-platform | **Selected: wry-style webview abstraction (Option B)** — use existing cross-platform solution rather than building own abstraction. GTK4 is Linux-only and not required. |
+| 2026-08-09 | **UI toolkit preference:** User prefers egui or iced over GTK4. egui is immediate-mode, iced is retained-mode. Both are Rust-native and cross-platform. Slint also added as option. Decision: evaluate all three, pick based on browser chrome requirements and license compatibility | User preference |
 
 ## Risks
 
-1. **WebKitGTK packaging/distribution:** Flatpak is the easiest path; deb/rpm packaging requires dependency management.
-2. **Boa maturity:** Boa is not yet spec-complete. Side-panel scripts must use a restricted feature set or fail gracefully.
-3. **Tiling complexity:** Drag-to-resize with persistent layouts requires careful state serialization.
-4. **Performance with tiling:** Multiple webviews in a single window are memory-heavy; consider suspending non-visible tiles.
-5. **Custom engine effort:** Writing or combining a production-ready rendering engine is a multi-year undertaking; scope and sequencing must be managed carefully.
-6. **Proxy complexity:** Advanced proxy features (PAC scripts, upstream chains, per-context routing) interact deeply with the networking stack and can introduce subtle security/correctness bugs.
-7. **Extension system scope:** Balancing a minimal Phase 1 extension API with a path to full WebExtensions compatibility requires careful interface design; too restrictive and Phase 2 migration is painful, too permissive and security suffers.
+1. **wry maturity:** wry is less mature than GTK4/WebKitGTK. Cross-platform webview abstraction may have platform-specific bugs or limitations.
+2. **egui/iced selection:** Choosing between egui (immediate-mode) and iced (retained-mode) affects the entire browser chrome architecture. Need to evaluate both before committing.
+3. **Boa maturity:** Boa is not yet spec-complete. Side-panel scripts must use a restricted feature set or fail gracefully.
+4. **Tiling complexity:** Drag-to-resize with persistent layouts requires careful state serialization.
+5. **Performance with tiling:** Multiple webviews in a single window are memory-heavy; consider suspending non-visible tiles.
+6. **Custom engine effort:** Writing or combining a production-ready rendering engine is a multi-year undertaking; scope and sequencing must be managed carefully.
+7. **Proxy complexity:** Advanced proxy features (PAC scripts, upstream chains, per-context routing) interact deeply with the networking stack and can introduce subtle security/correctness bugs.
+8. **Extension system scope:** Balancing a minimal Phase 1 extension API with a path to full WebExtensions compatibility requires careful interface design; too restrictive and Phase 2 migration is painful, too permissive and security suffers.
 
-## Why WebKitGTK in Phase 1
+## Why wry + WebKitGTK in Phase 1
 
 The table below breaks down what WebKitGTK provides versus building each piece in Rust. Without WebKitGTK, Phase 1 would take **2–4 years** longer because the major gaps have no production-ready Rust equivalents today.
 
@@ -380,7 +491,7 @@ The table below breaks down what WebKitGTK provides versus building each piece i
 | 1 | **HTML5 parser + DOM tree** | `html5ever` (Servo) | High — parsing is solid, but full tree construction and error recovery still need work | **3–6 months** for parser + DOM tree that handles real-world pages |
 | 2 | **CSS parser + selector matching** | `cssparser`, `selectors` (Servo) | High — used in production by Firefox/Servo for parsing | **2–4 months** for parsing; matching is straightforward |
 | 3 | **CSS box model + layout engine** | None complete. `style` (Servo) is research-quality only | Low — no production-ready Rust CSS layout engine exists | **6–18 months** for basic layout; **2–4 years** for full CSS2.1 + CSS3 compliance |
-| 4 | **Rendering / painting (skia/GTK)** | `webrender` (Mozilla, GPU), `pixels` (software), `skia-safe` (bindings) | Medium — `webrender` is production-grade but is a renderer, not a browser engine. `skia-safe` bindings exist but are complex | **3–6 months** basic; **1+ year** for production-quality with GTK4 integration |
+| 4 | **Rendering / painting** | `webrender` (Mozilla, GPU), `pixels` (software), `skia-safe` (bindings) | Medium — `webrender` is production-grade but is a renderer, not a browser engine. `skia-safe` bindings exist but are complex | **3–6 months** basic; **1+ year** for production-quality |
 | 5 | **JavaScriptCore (page JS)** | `rquickjs` (QuickJS bindings, mature), `boa` (Rust-native, incomplete), `deno_core` (V8 bindings, heavy) | Medium — QuickJS via rquickjs is usable. Boa is not spec-complete. V8 via deno_core is production-grade but massive | **Already solved** with rquickjs; Boa needs **6–12 months** more |
 | 6 | **Networking: HTTP/1.1, HTTP/2, HTTPS** | `reqwest`/`hyper` + `rustls` | High — production-ready, widely used | **Already solved** — weeks to integrate |
 | 7 | **Cookie handling** | `cookie_store` + `reqwest` | High — mature | **Already solved** — days to integrate |
@@ -467,7 +578,7 @@ Rendering is not "draw pixels." It's a multi-stage pipeline with strict correctn
 3. **Text is the hardest part.** Font rendering requires font fallback chains, OpenType features, sub-pixel anti-aliasing, color fonts, and variable fonts.
 4. **FreeType + HarfBuzz are the standard choices for text rendering in a custom engine.** FreeType handles font rasterization. HarfBuzz handles text shaping (ligatures, kerning, bidi). Both are mature C libraries with Rust bindings (`freetype-rs`, `rustybuzz`). This is one area where existing tools are solid.
 
-**Rust ecosystem status:** No production-ready browser renderer exists. `webrender` (Mozilla) is production-grade GPU rendering but is not a complete browser renderer — it's the paint step only. `skia-safe` bindings exist but are complex. A complete renderer would be 3–6 months basic, 1+ year production-quality with GTK4 integration.
+**Rust ecosystem status:** No production-ready browser renderer exists. `webrender` (Mozilla) is production-grade GPU rendering but is not a complete browser renderer — it's the paint step only. `skia-safe` bindings exist but are complex. A complete renderer would be 3–6 months basic, 1+ year production-quality.
 
 ### 3. IndexedDB
 
@@ -553,18 +664,20 @@ This section documents every crate and C/C++ library we expect to use, organized
 
 | Component | Crate / Library | Language | License | Maturity | Notes |
 |-----------|-----------------|----------|---------|----------|-------|
-| **GUI toolkit** | `gtk4-rs` / GTK4 | Rust / C | LGPL-2.1+ | High | Core shell. GTK4 preferred over libadwaita for customization. |
-| **Rendering backend** | WebKitGTK 4.1 | C/C++ | LGPL-2.1+ | High | Fallback rendering engine. Provides HTML/CSS/JS for web content. |
-| **Networking (via WebKitGTK)** | libsoup | C | LGPL-2.1+ | High | HTTP/1.1, HTTP/2, HTTPS, cookies, caching. |
-| **TLS (via WebKitGTK)** | GIO/TLS / GnuTLS or OpenSSL | C | LGPL/GPL | High | HTTPS support through WebKitGTK stack. |
+| **Webview abstraction** | `wry` | Rust | MIT/Apache-2.0 | Medium | Cross-platform webview. Uses WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows. |
+| **Windowing** | `tao` | Rust | MIT/Apache-2.0 | Medium | Windowing library used by wry. Provides window creation and event loop. |
+| **Browser chrome UI** | `egui` or `iced` | Rust | MIT/Apache-2.0 | Medium-High | Rust-native cross-platform GUI for tabs, address bar, side panels. egui is immediate-mode; iced is retained-mode. |
+| **Rendering backend (via wry)** | WebKitGTK 4.1 | C/C++ | LGPL-2.1+ | High | Linux backend for wry. Provides HTML/CSS/JS for web content. |
+| **Networking (via wry/WebKitGTK)** | libsoup | C | LGPL-2.1+ | High | HTTP/1.1, HTTP/2, HTTPS, cookies, caching. |
+| **TLS (via wry/WebKitGTK)** | GIO/TLS / GnuTLS or OpenSSL | C | LGPL/GPL | High | HTTPS support through WebKitGTK stack. |
 | **JavaScript (extensions)** | `rquickjs` | Rust + C | MIT | Medium-High | QuickJS bindings. Primary extension JS engine. |
 | **JavaScript (fallback)** | `boa` | Rust | MIT | Low-Medium | Rust-native JS engine. Fallback for specific use cases. Not spec-complete. |
 | **Database (browser state)** | `rusqlite` | Rust | MIT | High | SQLite for bookmarks, history, settings, sessions. |
 | **Secrets / credentials** | `libsecret` / `keyring` | C / Rust | LGPL-2.1+ / MIT | Medium | OS keyring integration for sensitive data. |
 | **Downloads** | `mime_guess` | Rust | MIT | High | MIME type detection for downloads. |
-| **File dialogs** | GTK4 native dialogs | C | LGPL-2.1+ | High | Save/load file choosers. |
+| **File dialogs** | Native OS dialogs via wry/tao | Rust | MIT/Apache-2.0 | Medium | Save/load file choosers. Platform-native. |
 | **JSON config** | `serde_json` | Rust | MIT/Apache-2.0 | High | Preferences file read/write. |
-| **Async runtime** | `glib` / `gio` | C | LGPL-2.1+ | High | GTK main loop integration. |
+| **Async runtime** | `tokio` or wry's built-in | Rust | MIT/Apache-2.0 | High | Async runtime if needed. wry may have its own event loop integration. |
 | **Logging** | `tracing` / `env_logger` | Rust | MIT/Apache-2.0 | High | Structured logging. |
 | **Error handling** | `thiserror` / `anyhow` | Rust | MIT/Apache-2.0 | High | Error types and propagation. |
 | **Text processing** | `url` / `percent-encoding` | Rust | MIT/Apache-2.0 | High | URL parsing and normalization. |
@@ -574,10 +687,10 @@ This section documents every crate and C/C++ library we expect to use, organized
 
 | Component | Crate / Library | Language | License | Maturity | Notes |
 |-----------|-----------------|----------|---------|----------|-------|
-| **Async runtime (alternative)** | `tokio` | Rust | MIT/Apache-2.0 | High | Only if WebKitGTK integration requires it. GTK main loop is usually sufficient. |
+| **Async runtime (alternative)** | `tokio` | Rust | MIT/Apache-2.0 | High | Only if wry integration requires it. |
 | **CLI parsing** | `clap` | Rust | MIT/Apache-2.0 | High | Command-line argument parsing for debugging. |
 | **Image handling** | `image` | Rust | MIT/Apache-2.0 | High | Favicon decoding, screenshot handling. |
-| **Compression** | `flate2` / `brotli` | Rust | MIT/Apache-2.0 | High | HTTP content decoding if needed beyond what WebKitGTK provides. |
+| **Compression** | `flate2` / `brotli` | Rust | MIT/Apache-2.0 | High | HTTP content decoding if needed beyond what wry provides. |
 
 ### Phase 3+ — Research / Custom Engine Dependencies
 
@@ -609,17 +722,15 @@ This section documents every crate and C/C++ library we expect to use, organized
 
 | Library | Purpose | License | Notes |
 |---------|---------|---------|-------|
-| **WebKitGTK** | Rendering engine, networking, JS (JSC), web storage | LGPL-2.1+ | Phase 1 fallback. Large dependency but essential. |
-| **GTK4** | GUI toolkit | LGPL-2.1+ | Core shell. |
+| **WebKitGTK** | Rendering engine (via wry on Linux), networking, JS (JSC), web storage | LGPL-2.1+ | Phase 1 Linux backend via wry. Large dependency but essential. |
+| **GTK4** | Not used — replaced by egui/iced + wry/tao | LGPL-2.1+ | Removed from dependencies. Not needed for cross-platform Rust stack. |
 | **FreeType** | Font rasterization | FreeType license | Standard for text rendering in custom engines. |
 | **HarfBuzz** | Text shaping | MIT | Standard for text shaping in custom engines. |
 | **Fontconfig** | Font discovery and fallback | MIT | Standard for font management on Linux. |
-| **libsoup** | HTTP networking (via WebKitGTK) | LGPL-2.1+ | |
-| **GIO/TLS** | TLS support (via WebKitGTK) | LGPL-2.1+ | |
+| **libsoup** | HTTP networking (via wry/WebKitGTK on Linux) | LGPL-2.1+ | |
+| **GIO/TLS** | TLS support (via wry/WebKitGTK on Linux) | LGPL-2.1+ | |
 | **libsecret** | OS keyring integration | LGPL-2.1+ | Credential storage. |
 | **SQLite** | Database engine | Public domain | Browser state storage. |
-| **cairo** | 2D graphics (via GTK/WebKitGTK) | LGPL-2.1+ | |
-| **Pango** | Text layout (via GTK) | LGPL-2.1+ | GTK's text layout engine. |
 
 ### License Compatibility Matrix
 
@@ -634,8 +745,11 @@ This section documents every crate and C/C++ library we expect to use, organized
 | GPL | Yes | Yes | Yes | Copyleft. Avoid for libraries if possible. |
 
 **Key licensing considerations:**
-- **WebKitGTK is LGPL-2.1+.** This means you can dynamically link to it in a proprietary browser. Static linking would require releasing object files. This is acceptable for Phase 1.
-- **GTK4 is LGPL-2.1+.** Same considerations as WebKitGTK.
+- **WebKitGTK is LGPL-2.1+.** This means you can dynamically link to it in a proprietary browser. Static linking would require releasing object files. This is acceptable for Phase 1 as a wry backend.
+- **wry is MIT/Apache-2.0.** Permissive. Safe to use.
+- **tao is MIT/Apache-2.0.** Permissive. Safe to use.
+- **egui is MIT/Apache-2.0.** Permissive. Safe to use.
+- **iced is MIT/Apache-2.0.** Permissive. Safe to use.
 - **Servo crates (`html5ever`, `cssparser`, `selectors`) are MIT/Apache-2.0.** Permissive. Safe to use.
 - **`webrender` is MPL-2.0.** File-level copyleft. Safe for most use cases, but changes to webrender itself must be released.
 - **`skia-safe` is MIT/Apache-2.0.** Permissive. Skia itself is BSD-licensed.
@@ -644,15 +758,15 @@ This section documents every crate and C/C++ library we expect to use, organized
 
 ## Validation Plan
 
-- **Milestone 1 (Weeks 1–2):** GTK window with a single WebKitGTK webview loads 5 test sites (Wikipedia, GitHub, Reddit, a SPA, and a site with heavy JS). Basic proxy UI works (system proxy + manual HTTP/HTTPS/SOCKS).
+- **Milestone 1 (Weeks 1–2):** Cross-platform Rust window with wry webview loads 5 test sites (Wikipedia, GitHub, Reddit, a SPA, and a site with heavy JS) on Linux. Basic proxy UI works (system proxy + manual HTTP/HTTPS/SOCKS). egui/iced chrome renders tabs and address bar.
 - **Milestone 2 (Weeks 3–4):** JS Engine Wrapper implemented: QuickJS primary, Boa fallback. Basic extension host loads a QuickJS-based content script and popup. Tab bar (basic) with create/close/duplicate/pin, drag-to-reorder, detach. Navigation bar with basic URL input, back/forward/reload/stop, and protocol handling (default missing protocol to https).
 - **Milestone 3 (Weeks 5–6):** Side panels with editable headers and persistent state. Request interception via basic extension API (ad blocking demo).
 - **Milestone 4 (Weeks 7–8):** Bookmarks, history, downloads, and settings.
 - **Milestone 5 (Weeks 9–10):** Session save/restore (current URLs only).
 - **Milestone 6 (Weeks 11–12):** Polish, basic themes, beta release.
-- **Milestone 7 (Phase 2):** Advanced proxy rules, PAC support, certificate handling UI, full WebExtensions API subset, URL autocomplete, search engine support, security indicators, bfcache integration, IDN/punycode, URL sanitization, multi-window support, tab mute/unmute, DevTools (WebKit built-in inspector via remote debugging protocol: console, basic DOM, basic network; storage viewer, security panel), download manager additions (pause/resume, categories, search, batch ops, speed limit, queue).
+- **Milestone 7 (Phase 2):** Advanced proxy rules, PAC support, certificate handling UI, full WebExtensions API subset, URL autocomplete, search engine support, security indicators, bfcache integration, IDN/punycode, URL sanitization, multi-window support, tab mute/unmute, DevTools (WebKit built-in inspector via remote debugging protocol: console, basic DOM, basic network; storage viewer, security panel), download manager additions (pause/resume, categories, search, batch ops, speed limit, queue), cross-platform support (Windows, macOS via wry).
 - **Milestone 8 (Phase 2):** Multi-profile support, settings export/import, settings sync.
-- **Milestone 9 (Phase 3):** Abstract rendering interface defined and implemented against WebKitGTK. Custom engine prototype Phase 0: load a basic HTML+CSS page and pass ACID test. Core request interception implemented natively. Tab tiling implemented (horizontal/vertical/grid, nested splits, drag between tiles). Navigation state model. Search vs URL detection. Keyboard navigation/focus model. Tab groups. Cookie viewer.
+- **Milestone 9 (Phase 3):** Abstract rendering interface defined and implemented against wry. Custom engine prototype Phase 0: load a basic HTML+CSS page and pass ACID test. Core request interception implemented natively. Tab tiling implemented (horizontal/vertical/grid, nested splits, drag between tiles). Navigation state model. Search vs URL detection. Keyboard navigation/focus model. Tab groups. Cookie viewer.
 - **Milestone 10 (Phase 3):** Custom engine prototype Phase 1: load real-world sites (Wikipedia, GitHub, etc.). Session restore with full navigation history.
 - **Milestone 11 (Phase 4):** Per-tab proxy routing, proxy authentication, tab suspension.
 - **Milestone 12 (Phase 5):** Advanced drag & drop (URL→tab, tab→tile).

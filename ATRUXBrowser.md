@@ -16,35 +16,37 @@ This is the main project document. It links to the detailed phase plans, archite
 
 ## Quick Reference
 
-- **Shell:** Rust + `gtk4-rs`
-- **Rendering (Phase 1):** WebKitGTK 4.1
+- **Shell:** Rust
+- **Webview abstraction (Phase 1/2):** wry (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows)
+- **Browser chrome UI:** egui, iced, or Slint (evaluate all three; Slint requires GPL/commercial license review)
 - **Rendering (Phase 3+):** Custom engine or combined packages
 - **JS Engine (Phase 1):** QuickJS primary, Boa fallback
 - **Browser State:** SQLite for bookmarks/history/settings/sessions
 - **Preferences:** Single JSON file
 - **Extensions (Phase 1):** Minimal custom API, directory-based loading
-- **Phase 1 Target:** Linux desktop only
-- **Phase 2 Target:** Cross-platform (Windows, macOS)
+- **Phase 1 Target:** Cross-platform Rust (Linux, Windows, macOS via wry)
+- **Phase 2 Target:** Same cross-platform stack, full Vivaldi feature set
 
 ## Phase Summary
 
 | Phase | Focus |
 |-------|-------|
-| **Phase 1** | Functional browser shell around WebKitGTK: tabs, navigation, proxy, extensions, bookmarks, downloads, settings |
-| **Phase 2** | Vivaldi-level features: multi-window, tiling, advanced proxy, full extensions, security indicators, themes |
-| **Phase 3** | Custom rendering engine: replace WebKitGTK with combined Rust packages or custom implementation |
+| **Phase 1** | Functional browser shell around wry webview: tabs, navigation, proxy, extensions, bookmarks, downloads, settings. Cross-platform via wry + egui/iced/Slint chrome. |
+| **Phase 2** | Vivaldi-level features: multi-window, tiling, advanced proxy, full extensions, security indicators, themes. Cross-platform: Linux, Windows, macOS. |
+| **Phase 3** | Custom rendering engine: replace wry backend with combined Rust packages or custom implementation |
 | **Phase 4** | Per-tab proxy, proxy authentication, tab suspension |
 | **Phase 5** | Advanced drag & drop (URL→tab, tab→tile) |
 
 ## Key Technical Decisions
 
-- **Rendering engine:** WebKitGTK 4.1 as Phase 1 fallback; custom engine in Phase 3
+- **Webview abstraction:** wry for cross-platform webview (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows)
+- **Browser chrome UI:** egui, iced, or Slint (evaluate all three; Slint requires GPL/commercial license review)
 - **Custom engine strategy:** Combine best existing packages first; write from scratch only if necessary
-- **JS engine:** QuickJS primary for extensions, Boa fallback; page JS via WebKitGTK's JavaScriptCore in Phase 1
+- **JS engine:** QuickJS primary for extensions, Boa fallback; page JS via wry backend's engine in Phase 1
 - **Browser state:** SQLite for structured data, JSON for preferences
 - **Settings:** Single JSON file, hybrid UI, first-run wizard
 - **Extensions:** Minimal custom API in Phase 1, full WebExtensions subset in Phase 2
-- **DevTools:** Reuse WebKit's built-in inspector in Phase 2; custom DevTools for custom engine in Phase 3
+- **DevTools:** Reuse wry/webview remote debugging in Phase 2; custom DevTools for custom engine in Phase 3
 
 ## Critical Path Awareness
 
