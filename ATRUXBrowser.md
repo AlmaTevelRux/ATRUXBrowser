@@ -1,118 +1,59 @@
-# Project Briefing & Architectural Guidelines (v2)
+# ATRUXBrowser — Project Hub
 
-This document serves as a comprehensive briefing guide and state-retrieval context for any subsequent AI assistant helping you build your custom web browser and interface solutions. It defines the foundational roadmap, design patterns, and engineering strategies established for our custom web browser project and desktop environment configurations.
+This is the main project document. It links to the detailed phase plans, architecture decisions, and technical analysis.
 
----
+## Documentation
 
-## 1. Browser Architecture Strategy
+| Document | Description |
+|----------|-------------|
+| **[ATRUXBrowser.md](ATRUXBrowser.md)** | Original architectural guidelines and vision |
+| **[phase1.md](phase1.md)** | Phase 1: Functional desktop browser with Vivaldi-inspired UI |
+| **[phase2.md](phase2.md)** | Phase 2: Full Vivaldi-level feature set |
+| **[phase3.md](phase3.md)** | Phase 3: Custom engine integration |
+| **[phase4.md](phase4.md)** | Phase 4: Per-tab proxy routing, proxy auth, tab suspension |
+| **[phase5.md](phase5.md)** | Phase 5: Advanced drag & drop |
+| **Architecture Plan** | `.kilo/plans/1786212041181-atruxbrowser-doc-review.md` — Full architecture with all decisions, component breakdowns, validation milestones, crate inventory, and technical deep-dive |
 
-### Engine Selection: Pure Interpreters (`QuickJS` / `Boa`)
-We have bypassed heavyweight JIT engines (like V8 or SpiderMonkey) in favor of a lean, secure, and resource-efficient runtime footprint.
+## Quick Reference
 
-*   **Selected Candidates:** 
-    *   **QuickJS:** A mature, ultra-lightweight C engine with near-instant instantiation (<300μs) and exceptional memory efficiency (<1MB RAM).
-    *   **Boa:** A modern, memory-safe ECMAScript engine written entirely in Rust, moving toward future JIT capabilities.
-*   **The Non-JIT Paradigm:** The architecture strictly relies on **pure interpretation** (compiling JS to bytecode and executing via a virtual machine loop) rather than JIT compilation to native machine code.
-    *   *Benefits:* Complete immunization against JIT-based memory-corruption security vulnerabilities, zero warm-up latencies, and minimal memory overhead.
-    *   *Tradeoffs:* Heavy computational operations (physics loops, massive arrays, canvas rendering) and dense SPA frameworks will run slower compared to JIT-driven environments.
+- **Shell:** Rust + `gtk4-rs`
+- **Rendering (Phase 1):** WebKitGTK 4.1
+- **Rendering (Phase 3+):** Custom engine or combined packages
+- **JS Engine (Phase 1):** QuickJS primary, Boa fallback
+- **Browser State:** SQLite for bookmarks/history/settings/sessions
+- **Preferences:** Single JSON file
+- **Extensions (Phase 1):** Minimal custom API, directory-based loading
+- **Phase 1 Target:** Linux desktop only
+- **Phase 2 Target:** Cross-platform (Windows, macOS)
 
----
+## Phase Summary
 
-## 2. Dual-Engine Architecture & Abstract Engine Wrappers
+| Phase | Focus |
+|-------|-------|
+| **Phase 1** | Functional browser shell around WebKitGTK: tabs, navigation, proxy, extensions, bookmarks, downloads, settings |
+| **Phase 2** | Vivaldi-level features: multi-window, tiling, advanced proxy, full extensions, security indicators, themes |
+| **Phase 3** | Custom rendering engine: replace WebKitGTK with combined Rust packages or custom implementation |
+| **Phase 4** | Per-tab proxy, proxy authentication, tab suspension |
+| **Phase 5** | Advanced drag & drop (URL→tab, tab→tile) |
 
-To maximize compatibility, security, and developer control, the browser implements a **Dual-Engine Strategy**, housing both QuickJS and Boa simultaneously. This allows runtime selection of the engine based on execution contexts, compatibility requirements, or tab-level isolation boundaries.
+## Key Technical Decisions
 
-### The Abstract Engine Interface
-To keep the browser UI shell clean and decoupled from low-level engine nuances, a unified **Abstract Engine Wrapper** sits between the shell and the execution layer. The browser core interacts exclusively with this abstract interface.
+- **Rendering engine:** WebKitGTK 4.1 as Phase 1 fallback; custom engine in Phase 3
+- **Custom engine strategy:** Combine best existing packages first; write from scratch only if necessary
+- **JS engine:** QuickJS primary for extensions, Boa fallback; page JS via WebKitGTK's JavaScriptCore in Phase 1
+- **Browser state:** SQLite for structured data, JSON for preferences
+- **Settings:** Single JSON file, hybrid UI, first-run wizard
+- **Extensions:** Minimal custom API in Phase 1, full WebExtensions subset in Phase 2
+- **DevTools:** Reuse WebKit's built-in inspector in Phase 2; custom DevTools for custom engine in Phase 3
 
+## Critical Path Awareness
 
-```
+The five major gaps in the Rust ecosystem that prevent replacing WebKitGTK in Phase 1:
 
-```
-   [ Browser Shell UI / Navigation ]
-                   │
-                   ▼
-      [ Abstract Engine Wrapper ]
-       (Unified eval, bind, call)
-                   │
-    ┌──────────────┴──────────────┐
-    ▼                             ▼
+1. **CSS layout** — No production-ready Rust CSS layout engine exists
+2. **Rendering / painting** — No production-ready Rust browser renderer exists
+3. **IndexedDB** — No mature Rust implementation exists
+4. **bfcache** — No Rust implementation exists
+5. **DevTools protocol** — No mature Rust implementation exists
 
-```
-
-[ QuickJS ]                    [ Boa ]
-(C / WASM Binding)          (Native Rust)
-
-```
-
-#### Reference Rust Interface Blueprint
-```rust
-// A unified abstract wrapper implementation template
-pub trait BrowserJSEngine {
-    fn create_context(&mut self) -> Result<(), EngineError>;
-    fn eval_string(&mut self, code: &str) -> Result<JSValue, EngineError>;
-    fn register_native_fn(&mut self, name: &str, callback: NativeCallback) -> Result<(), EngineError>;
-    fn collect_garbage(&mut self);
-}
-
-```
-
-### Language Integration Blueprints
-
-#### Scenario A: The Browser Shell is in Rust
-
-* **Boa Integration:** Directly embedded via the native `boa_engine` crate.
-* **QuickJS Integration:** Embedded via a safe wrapper layer (such as the `rquickjs` crate) handling the underlying C compilation out of the box.
-* **Wrapper Logic:** Driven by an `enum EngineType { QuickJS, Boa }` dynamically routing calls through the trait interface.
-
-#### Scenario B: The Browser Shell is in C/C++
-
-* **QuickJS Integration:** Compiled directly as modular C sources (`quickjs.c`, `quickjs-libc.c`).
-* **Boa Integration:** Compiled as a static library target (`.a` or `.lib`) using Rust's `cdylib` configurations, exposing C-compatible bindings (`extern "C"`) to be linked by the main host toolchain.
-
-### Core Architectural Use Cases
-
-1. **Fault-Tolerant Execution Fallback:** If a script triggers a processing error or hits an un-implemented syntax node in the developing `Boa` interpreter, the wrapper catches the exception and transparently hot-swaps execution to the spec-complete `QuickJS` instance.
-2. **Isolated Sandboxing:** Risky or untrusted background workloads route directly through `Boa` to benefit from Rust's safety guarantees, while everyday UI rendering relies on the battle-tested runtime speed of `QuickJS`.
-3. **Comparative Profiling:** DevTools can house an instant toggle to hot-swap engine environments for real-time profiling of memory usage, garbage collection latency, and bytecode parsing performance.
-
----
-
-## 3. Browser Interface & UX Logic (Vivaldi Case Studies)
-
-When building user workflows or analyzing UX paradigms, we leverage advanced interface mechanics modeled after Vivaldi’s layout control engine:
-
-### Tab Tiling & Screen Splitting
-
-* **Mechanics:** Native support for multi-tab rendering within a single window viewport without extensions. Layouts must adapt to horizontal, vertical, or grid matrices.
-* **State Management:** Viewports must allow granular resizing via draggable boundary lines, preserving layout states inside session structures.
-
-### Component Customization Boundaries
-
-* **Systemic Components:** Core browser panels (e.g., Bookmarks, History, Downloads) feature hardcoded system schemas. They support visual asset overrides (SVG icons) but prevent system-level renaming.
-* **Dynamic Components (Web Panels):** Custom web wrappers injected into the UI side-bar. These components possess editable headers, allowing explicit overrides of titles and dimensions directly via user interaction or global configuration screens.
-
----
-
-## 4. Network & Request Manipulation (Gmail Mobile Override)
-
-When dealing with application layouts or sandboxed environments that aggressively enforce desktop redirects, use structural overrides:
-
-* **URL Path Injection:** Target direct endpoint wrappers that bypass front-end responsive routers (e.g., Google's `https://mail.google.com/mail/mu/mp/`).
-* **User-Agent Spoofing:** When handling layout routing, manipulate the client headers to mimic touch-optimized ecosystems (iOS Safari / Android Chrome) to force low-overhead mobile layouts natively.
-
----
-
-## 5. JS Engine Reference Matrix (Performance & Contexts)
-
-When optimizing server-side utilities, tools, or building comparison models, refer to this performance baseline:
-
-* **Raw Core Speed:** Apple's **JavaScriptCore (JSC)** provides the fastest raw startup times and low memory footprints among JIT engines.
-* **Tooling & Serverless:** **Bun** (built on JSC and Zig) dominates script execution, cold-starts, and local package management speed.
-* **Throughput:** **Deno** (built on V8 and Rust) provides peak HTTP single-core JSON request throughput.
-
----
-
-## Instructions for Next AI Assistant
-
-> When assisting with this project, prioritize **memory safety, code scannability, and structural minimalism**. Avoid suggesting heavy frameworks or unnecessary layers unless explicitly requested. Keep code architectures modular so that switching the JS engine binding layer between C (`QuickJS`) and Rust (`Boa`) remains frictionless through the wrapper layer.
+These are documented in detail in the Architecture Plan under "Technical Deep-Dive: The Five Gaps."
